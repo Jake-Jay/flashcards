@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Flashcards</title>
+
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="icon" href="icon-512.png" type="image/png">
+
+  <meta name="theme-color" content="#0e1116">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Flashcards">
+</head>
+<body>
+  <header>
+    <div class="row">
+      <label for="topic">Topic</label>
+      <select id="topic"></select>
+      <span id="stats" class="stats"></span>
+      <button id="reset" class="ghost" type="button">Reset stats</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="card" class="card" hidden>
+      <div class="meta">
+        <span id="card-topic" class="topic-pill"></span>
+        <span id="card-counts" class="counts"></span>
+      </div>
+      <div id="question" class="question"></div>
+      <pre id="answer" class="answer" hidden></pre>
+
+      <div class="actions">
+        <button id="reveal" type="button">Reveal (space)</button>
+        <div id="grade" class="grade" hidden>
+          <button id="right" class="good" type="button">Right (1)</button>
+          <button id="wrong" class="bad" type="button">Wrong (2)</button>
+          <button id="dontcare" class="ghost" type="button">Don't care (3)</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="empty" class="empty" hidden>
+      <p>No cards available in this topic. Mark some as "don't care"? Try a different filter, or reset stats.</p>
+    </section>
+  </main>
+
+  <script src="cards.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
