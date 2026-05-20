@@ -1,4 +1,4 @@
-const VERSION = 'flashcards-v2';
+const VERSION = 'flashcards-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -24,16 +24,16 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+// Network-first: fresh content when online, cached fallback when offline.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(e.request).then((res) => {
+    fetch(e.request)
+      .then((res) => {
         const copy = res.clone();
         caches.open(VERSION).then((cache) => cache.put(e.request, copy)).catch(() => {});
         return res;
-      }).catch(() => cached);
-    })
+      })
+      .catch(() => caches.match(e.request))
   );
 });
