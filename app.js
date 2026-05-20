@@ -6,6 +6,7 @@ const els = {
   topic: document.getElementById('topic'),
   stats: document.getElementById('stats'),
   reset: document.getElementById('reset'),
+  exportBtn: document.getElementById('export'),
   card: document.getElementById('card'),
   empty: document.getElementById('empty'),
   cardTopic: document.getElementById('card-topic'),
@@ -159,6 +160,77 @@ function grade(kind) {
   renderCard();
 }
 
+function buildReport() {
+  const stats = getStats();
+  const byId = Object.fromEntries(cards.map(c => [c.id, c]));
+  const rows = Object.entries(stats).map(([id, s]) => {
+    const card = byId[id] || { topic: '(removed)', q: '(card no longer exists)' };
+    return {
+      id, topic: card.topic, q: card.q,
+      right: s.right || 0, wrong: s.wrong || 0,
+      dontCare: !!s.dontCare, seen: (s.right || 0) + (s.wrong || 0),
+    };
+  });
+
+  const reviewed = rows.filter(r => r.seen > 0);
+  const totalRight = reviewed.reduce((a, r) => a + r.right, 0);
+  const totalWrong = reviewed.reduce((a, r) => a + r.wrong, 0);
+  const reviews = totalRight + totalWrong;
+  const acc = reviews ? Math.round((100 * totalRight) / reviews) : 0;
+
+  const topics = {};
+  for (const r of reviewed) {
+    const t = topics[r.topic] || (topics[r.topic] = { right: 0, wrong: 0 });
+    t.right += r.right; t.wrong += r.wrong;
+  }
+  const topicLines = Object.entries(topics)
+    .map(([t, v]) => {
+      const n = v.right + v.wrong;
+      return { a: n ? Math.round((100 * v.right) / n) : 0, line: `  ${t}: ${v.right}R / ${v.wrong}W — ${n ? Math.round((100 * v.right) / n) : 0}%` };
+    })
+    .sort((x, y) => x.a - y.a)
+    .map(x => x.line);
+
+  const weak = reviewed
+    .filter(r => r.wrong > 0)
+    .sort((a, b) => (b.wrong - a.wrong) || (a.right - b.right))
+    .map(r => `  [${r.topic}] ${r.id} — ${r.right}R / ${r.wrong}W — ${r.q.slice(0, 70)}`);
+
+  const hidden = rows.filter(r => r.dontCare).length;
+
+  const out = [];
+  out.push(`Flashcards report — ${new Date().toISOString().slice(0, 10)}`);
+  out.push(`Overall: ${reviewed.length}/${cards.length} cards seen · ${acc}% correct · ${reviews} reviews · ${hidden} hidden`);
+  out.push('');
+  out.push('Per-topic (worst first):');
+  out.push(...(topicLines.length ? topicLines : ['  (no reviews yet)']));
+  out.push('');
+  out.push('Most-missed cards:');
+  out.push(...(weak.length ? weak : ['  (none — no wrong answers recorded)']));
+  out.push('');
+  out.push('Raw stats JSON:');
+  out.push(JSON.stringify(stats));
+  return out.join('\n');
+}
+
+async function exportStats() {
+  const report = buildReport();
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'Flashcards report', text: report });
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(report);
+    alert('Report copied to clipboard — paste it to share.');
+  } catch {
+    prompt('Copy your report:', report);
+  }
+}
+
 function attachHandlers() {
   els.topic.addEventListener('change', () => {
     setActiveTopic(els.topic.value);
@@ -172,6 +244,7 @@ function attachHandlers() {
       renderCard();
     }
   });
+  els.exportBtn.addEventListener('click', exportStats);
   els.reveal.addEventListener('click', reveal);
   els.right.addEventListener('click', () => grade('right'));
   els.wrong.addEventListener('click', () => grade('wrong'));
