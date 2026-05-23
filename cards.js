@@ -605,5 +605,26 @@ window.CARDS = [
     "topic": "attention",
     "q": "Multi-head attention: A is (b, h, i, j) weights, Vh is (b, j, h, l) per-head values. Write the einsum for the per-head output (b, h, i, l), then merge the heads.",
     "a": "O = torch.einsum('bhij,bjhl->bhil', A, Vh)   # (b, h, i, l)\nO = O.transpose(1, 2).reshape(b, t, h * l)   # concat heads -> (b, t, d_v)\n\nj (key/token axis) is shared between A and Vh -> contracted (weighted sum over keys). h shared+kept -> per-head; i kept (query); l kept (value feature).\n\nCommon bug: writing 'bhij,bkl->bhil' with a fresh k for V's token axis -> j and k are both dropped and summed separately, so every row collapses to sum_tokens(V). Reuse j."
+  },
+
+  {
+    "id": "attn-mha-head-reshape",
+    "topic": "attention",
+    "q": "Multi-head attention: how do you split (B, T, d_model) into heads and merge back? Why can't you reshape straight to (B, H, T, d_h)?",
+    "a": "Split: reshape the LAST dim into (H, d_h), THEN move heads in front:\n  Qh = Q.reshape(B, T, H, d_h).transpose(1, 2)   # (B, H, T, d_h)\nMerge: transpose tokens back in front of heads, THEN flatten:\n  O = O.transpose(1, 2).reshape(B, T, H * d_h)   # (B, T, d_v)\n\nWhy NOT Q.reshape(B, H, T, d_h) directly: reshape walks the flat row-major buffer, so it would put token 0's whole feature vector (plus part of token 1) into head 0 — scrambling tokens with features. Split only the feature axis (leaving B, T intact), then transpose.\n\nGotcha: after transpose the tensor is non-contiguous, so use .reshape (copies) not .view (errors)."
+  },
+
+  {
+    "id": "attn-mha-output-proj",
+    "topic": "attention",
+    "q": "Why does multi-head attention need the output projection Wo even when the concatenated heads are already d_model wide?",
+    "a": "Wo's real job is to MIX information across heads, not just resize.\n\nConcatenation stacks heads in disjoint coordinate blocks: output dim k would only ever see head floor(k / d_vh). Wo is a full (d_res x d_v) matrix, so each output coordinate becomes a LEARNED linear combination of ALL heads. Without it the heads never interact.\n\nShapes: single head -> d_vh; concat heads -> d_v = H*d_vh; Wo: d_v -> d_res (residual width). Resizing is a side benefit; cross-head mixing is the point.\n\nA MHA layer has 4 linears: Wq, Wk, Wv (in) + Wo (out). Textbooks set d_v = d_res = d_model so Wo looks square, but it's never a no-op."
+  },
+
+  {
+    "id": "attn-mask-fully-masked-nan",
+    "topic": "numerical-stability",
+    "q": "torch.softmax is numerically stable, so when does an attention mask still produce NaNs?",
+    "a": "When an ENTIRE row is masked to -inf. softmax of an all -inf row = exp(-inf - (-inf)) = exp(nan) = nan, and that NaN silently poisons the gradients.\n\nCausal masking via triu(diagonal=1) is SAFE: every query keeps its own diagonal entry, so no row is fully masked. The risk shows up with PADDING masks — a fully-padded query row, or a key-padding mask that wipes every key for some row.\n\nFixes: don't fully mask a row (mask the LOSS at pad positions instead), or use a large negative (-1e9) instead of -inf, or zero NaN rows after softmax.\n\n(Aside: torch.softmax already subtracts the row max internally, so you never need a manual -max for stability.)"
   }
 ];
