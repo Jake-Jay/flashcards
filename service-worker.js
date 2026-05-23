@@ -1,4 +1,4 @@
-const VERSION = 'flashcards-v3';
+const VERSION = 'flashcards-v4';
 const ASSETS = [
   './',
   './index.html',

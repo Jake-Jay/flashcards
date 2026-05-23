@@ -509,5 +509,66 @@ window.CARDS = [
     "topic": "prob-stats",
     "q": "Why is L2 weight decay equivalent to a Gaussian prior? And what's MLE vs MAP?",
     "a": "MLE: argmax_theta  log p(D | theta)                    -> minimize negative log-likelihood\nMAP: argmax_theta  log p(D | theta) + log p(theta)    -> MLE + prior term\n\nGaussian prior  N(0, sigma^2) on weights -> log p(theta) is proportional to -||theta||^2 -> L2 penalty.\nLaplace prior -> L1 penalty.\n\nSo 'weight decay' is just doing MAP estimation with a Gaussian prior on weights — the Bayesian reading of regularization."
+  },
+
+  {
+    "id": "linear-weight-layout",
+    "topic": "layers",
+    "q": "What shape is nn.Linear(in, out).weight, what does the layer compute, and why is it stored that way?",
+    "a": "weight has shape (out, in) — you pass (in, out) but it's stored transposed. The layer computes y = x @ weight.T + b.\n\nWhy: it matches the textbook column form y = W x (W is (out, in), x a column). Applying x @ W.T lets that same W act on row-batched data X of shape (N, in). Same map, weight transposed.\n\nConsequence: in X @ W the output rows are combinations of the ROWS of W. Square layers hide the transpose; non-square expose it. For Q/K/V use nn.Linear(d, d, bias=False)."
+  },
+  {
+    "id": "attn-sdpa-matmul",
+    "topic": "attention",
+    "q": "Scaled dot-product attention, single sequence. Q, K, V each (T, d). Write scores, weights, output with plain matmul.",
+    "a": "d = Q.shape[-1]\nscores = Q @ K.T / d**0.5          # (T, T): row i = query i scored vs every key\nA = torch.softmax(scores, dim=-1)  # normalise over the KEY axis\nO = A @ V                          # (T, d)\n\nScale by sqrt(d) so logits don't grow with dimension and saturate softmax. dim=-1 because each row is one query's distribution over keys."
+  },
+  {
+    "id": "attn-sdpa-einsum",
+    "topic": "attention",
+    "q": "Same single-sequence attention (Q, K, V each (T, d)) but use einsum for the scores and output — no manual .T.",
+    "a": "scores = torch.einsum('id,jd->ij', Q, K) / d**0.5\nA = torch.softmax(scores, dim=-1)\nO = torch.einsum('ij,jd->id', A, V)\n\n'id,jd->ij' contracts the feature dim d  -> scores[i,j] = query i . key j.\n'ij,jd->id' contracts the key dim j      -> mixes value vectors by the weights.\nIdentical result to the matmul form."
+  },
+  {
+    "id": "attn-batched-matmul",
+    "topic": "attention",
+    "q": "Batched attention, Q/K/V each (B, T, d). Write it with matmul. What replaces K.T?",
+    "a": "scores = Q @ K.transpose(-2, -1) / d**0.5   # (B, T, T)\nA = torch.softmax(scores, dim=-1)\nO = A @ V                                   # (B, T, d)\n\n@ batches over leading dims automatically. Use transpose(-2, -1) (swap the last two dims), NOT .T — on a >2D tensor .T reverses ALL dims and is deprecated."
+  },
+  {
+    "id": "attn-batched-einsum",
+    "topic": "attention",
+    "q": "Batched attention scores with einsum, Q/K each (B, T, d). Write the string; say which axis is summed and which pass through.",
+    "a": "scores = torch.einsum('bid,bjd->bij', Q, K) / d**0.5   # (B, T, T)\n\nb: shared + kept    -> batch (pairs batch with batch, not summed)\nd: shared + dropped -> summed (this IS the dot product)\ni, j: kept          -> all query x key pairs\n\nRule: a letter on the right of -> is a loop; a letter missing from the right is a sum."
+  },
+  {
+    "id": "attn-bug-floordiv",
+    "topic": "attention",
+    "q": "Spot the bug:\n  scores = Q @ K.transpose(-2, -1) // d**0.5\n  A = torch.softmax(scores, dim=-1)",
+    "a": "// is FLOOR division. It floors every logit to an integer before softmax (e.g. -5.1 -> -6.0), quantising the scores. Use a single / .\n\nNasty because it still runs and the attention matrix looks plausible — no error, just silently wrong numbers."
+  },
+  {
+    "id": "attn-bug-same-weight",
+    "topic": "attention",
+    "q": "Spot the bug:\n  Q = X @ Wq\n  K = X @ Wq\n  V = X @ Wv",
+    "a": "K is projected with Wq, not Wk  ->  Q == K. Every token's query equals its own key, so each token scores highest against itself and the attention matrix collapses onto the diagonal.\n\nQ, K, V each need their own weight matrix. Classic copy-paste bug."
+  },
+  {
+    "id": "attn-bug-softmax-dim",
+    "topic": "attention",
+    "q": "scores is (T, T) with rows = queries, cols = keys. Spot the bug:\n  A = torch.softmax(scores, dim=0)\n  O = A @ V",
+    "a": "dim=0 normalises down each COLUMN (over queries), so a single query's weights no longer sum to 1 — the rows aren't distributions. Softmax must be over the KEY axis: dim=-1.\n\n(If scores were laid out keys-on-rows, i.e. K @ Q.T, then dim=0 would be right — the axis must match the layout.)"
+  },
+  {
+    "id": "attn-bug-mask-order",
+    "topic": "attention",
+    "q": "Causal mask. Spot the bug:\n  A = torch.softmax(scores, dim=-1)\n  mask = torch.triu(torch.ones(T, T), diagonal=1).bool()\n  A = A.masked_fill(mask, float('-inf'))",
+    "a": "The mask is applied AFTER softmax. Filling already-normalised weights with -inf gives a row full of -inf/NaN that no longer sums to 1.\n\nMask the SCORES before softmax so masked positions become 0:\n  scores = scores.masked_fill(mask, float('-inf'))\n  A = torch.softmax(scores, dim=-1)\n\n(diagonal=1 is correct: keep the diagonal so a token can attend to itself.)"
+  },
+  {
+    "id": "attn-bug-einsum-transpose",
+    "topic": "attention",
+    "q": "You want scores[b,i,j] = query i . key j, with Q/K each (B, T, d). Spot the bug:\n  scores = torch.einsum('bid,bjd->bji', Q, K)\n  A = torch.softmax(scores, dim=-1)",
+    "a": "Output order is bji, which transposes the score matrix: axis 1 becomes the key, axis 2 the query. Then softmax(dim=-1) normalises over QUERIES, not keys.\n\nWant ->bij. The contraction (d) is right; only the output order is wrong. Easy to miss because the shape is still (B, T, T)."
   }
 ];
