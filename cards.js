@@ -584,5 +584,26 @@ window.CARDS = [
     "topic": "attention",
     "q": "Why divide attention scores by sqrt(d_k)? Give the variance argument and the consequence for softmax and gradients.",
     "a": "With q, k components independent, mean 0, var 1:\n  q.k = sum_{i=1..d_k} q_i k_i\n  E[q.k] = 0,  Var(q.k) = d_k   ->  std = sqrt(d_k)\n(Variance adds over d_k independent unit-variance terms. Random-walk intuition: the sum grows like sqrt(d_k), not d_k, because two random vectors are near-orthogonal.)\n\nDivide by sqrt(d_k)  ->  Var(scores) = 1, independent of dimension.\n\nWhy you want it:\n- softmax sharpness depends on the logit SPREAD. Unscaled spread = sqrt(d_k), so the hidden size alone would make attention peaky.\n- A saturated (near one-hot) softmax has a near-zero Jacobian (diag(p) - p p^T), so gradients to Wq/Wk vanish -> training stalls.\n- Scaling pins logit variance to 1, keeping softmax responsive (sharpness becomes LEARNED via Wq/Wk, not dictated by d_k).\n\nScale is sqrt(d_k) (the key/query dim), NOT d_model or d_v — the variance accumulates over the d_k shared components of q.k."
+  },
+
+  {
+    "id": "einsum-contract-shared-letter",
+    "topic": "math-ops",
+    "q": "In einsum, what happens if the axis you mean to contract has a DIFFERENT letter in each operand and is left out of the output? e.g. torch.einsum('ik,jl->ij', A, B)",
+    "a": "Every letter that's in the inputs but missing from the output is summed INDEPENDENTLY. So 'ik,jl->ij' = (sum_k A[i,k]) * (sum_l B[j,l]) — an outer product of row-sums, NOT a dot product.\n\nTo contract (dot) two operands over an axis, give it the SAME letter in both and omit it from the output:\n  'ik,jk->ij'  =  A @ B.T\n\nRule: shared letter + dropped = contracted (one dot); distinct letters + dropped = two separate sums. The silent killer: it still runs and the shape looks right."
+  },
+
+  {
+    "id": "attn-mha-scores-einsum",
+    "topic": "attention",
+    "q": "Multi-head attention with per-head tensors Qh, Kh of shape (b, t, h, d_h). Write the einsum for per-head scores (b, h, i, j) and give each letter's role.",
+    "a": "scores = torch.einsum('bihd,bjhd->bhij', Qh, Kh)\n\nb: shared + kept    -> batch\nh: shared + kept    -> per-head (heads stay separate, never mixed)\nd: shared + dropped -> contracted (the per-head dot product)\ni: only Qh, kept    -> query token\nj: only Kh, kept    -> key token\n\nd MUST be the same letter in both operands, or you get an outer product of feature-sums instead of a dot. Then: A = softmax(scores / d_h**0.5 + mask, dim=-1)."
+  },
+
+  {
+    "id": "attn-mha-output-einsum",
+    "topic": "attention",
+    "q": "Multi-head attention: A is (b, h, i, j) weights, Vh is (b, j, h, l) per-head values. Write the einsum for the per-head output (b, h, i, l), then merge the heads.",
+    "a": "O = torch.einsum('bhij,bjhl->bhil', A, Vh)   # (b, h, i, l)\nO = O.transpose(1, 2).reshape(b, t, h * l)   # concat heads -> (b, t, d_v)\n\nj (key/token axis) is shared between A and Vh -> contracted (weighted sum over keys). h shared+kept -> per-head; i kept (query); l kept (value feature).\n\nCommon bug: writing 'bhij,bkl->bhil' with a fresh k for V's token axis -> j and k are both dropped and summed separately, so every row collapses to sum_tokens(V). Reuse j."
   }
 ];
