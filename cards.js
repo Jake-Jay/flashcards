@@ -577,5 +577,12 @@ window.CARDS = [
     "topic": "attention",
     "q": "Self-attention, input x: (B, T, d_model), with d_k and d_v possibly != d_model. Give the shapes of Wq/Wk/Wv, Q/K/V, the scores, and the output. What do you scale by?",
     "a": "Wq, Wk = nn.Linear(d_model, d_k)   ->  Q, K : (B, T, d_k)\nWv     = nn.Linear(d_model, d_v)   ->  V    : (B, T, d_v)\n\nscores = Q @ K.transpose(-2, -1)            : (B, T, T)   # contracts d_k\nA      = softmax(scores / d_k**0.5, dim=-1) : (B, T, T)\nout    = A @ V                              : (B, T, d_v)\n\nKey points:\n- All THREE projections take d_model as INPUT (they share x); only the OUTPUT dims differ.\n- d_q == d_k is required (for the Q.K dot product); d_v is free.\n- Scale by sqrt(d_k) — the KEY dim, not d_model.\n- Output width = d_v. Add Wo: d_v -> d_model to restore the residual width."
+  },
+
+  {
+    "id": "attn-scale-why",
+    "topic": "attention",
+    "q": "Why divide attention scores by sqrt(d_k)? Give the variance argument and the consequence for softmax and gradients.",
+    "a": "With q, k components independent, mean 0, var 1:\n  q.k = sum_{i=1..d_k} q_i k_i\n  E[q.k] = 0,  Var(q.k) = d_k   ->  std = sqrt(d_k)\n(Variance adds over d_k independent unit-variance terms. Random-walk intuition: the sum grows like sqrt(d_k), not d_k, because two random vectors are near-orthogonal.)\n\nDivide by sqrt(d_k)  ->  Var(scores) = 1, independent of dimension.\n\nWhy you want it:\n- softmax sharpness depends on the logit SPREAD. Unscaled spread = sqrt(d_k), so the hidden size alone would make attention peaky.\n- A saturated (near one-hot) softmax has a near-zero Jacobian (diag(p) - p p^T), so gradients to Wq/Wk vanish -> training stalls.\n- Scaling pins logit variance to 1, keeping softmax responsive (sharpness becomes LEARNED via Wq/Wk, not dictated by d_k).\n\nScale is sqrt(d_k) (the key/query dim), NOT d_model or d_v — the variance accumulates over the d_k shared components of q.k."
   }
 ];
