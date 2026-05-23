@@ -570,5 +570,12 @@ window.CARDS = [
     "topic": "attention",
     "q": "You want scores[b,i,j] = query i . key j, with Q/K each (B, T, d). Spot the bug:\n  scores = torch.einsum('bid,bjd->bji', Q, K)\n  A = torch.softmax(scores, dim=-1)",
     "a": "Output order is bji, which transposes the score matrix: axis 1 becomes the key, axis 2 the query. Then softmax(dim=-1) normalises over QUERIES, not keys.\n\nWant ->bij. The contraction (d) is right; only the output order is wrong. Easy to miss because the shape is still (B, T, T)."
+  },
+
+  {
+    "id": "attn-projection-shapes",
+    "topic": "attention",
+    "q": "Self-attention, input x: (B, T, d_model), with d_k and d_v possibly != d_model. Give the shapes of Wq/Wk/Wv, Q/K/V, the scores, and the output. What do you scale by?",
+    "a": "Wq, Wk = nn.Linear(d_model, d_k)   ->  Q, K : (B, T, d_k)\nWv     = nn.Linear(d_model, d_v)   ->  V    : (B, T, d_v)\n\nscores = Q @ K.transpose(-2, -1)            : (B, T, T)   # contracts d_k\nA      = softmax(scores / d_k**0.5, dim=-1) : (B, T, T)\nout    = A @ V                              : (B, T, d_v)\n\nKey points:\n- All THREE projections take d_model as INPUT (they share x); only the OUTPUT dims differ.\n- d_q == d_k is required (for the Q.K dot product); d_v is free.\n- Scale by sqrt(d_k) — the KEY dim, not d_model.\n- Output width = d_v. Add Wo: d_v -> d_model to restore the residual width."
   }
 ];
